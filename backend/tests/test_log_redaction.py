@@ -103,6 +103,21 @@ def test_api_app_factory_installs_filter(tmp_path):
 
 
 @pytest.mark.stdlib_only
+def test_uvicorn_access_record_keeps_its_five_args_and_is_redacted():
+    """uvicorn's AccessFormatter unpacks exactly five args; folding them into msg broke every request log."""
+    from backend.core.log_redaction import RedactingFilter
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 1,
+        '%s - "%s %s HTTP/%s" %d',
+        ("1.2.3.4:5", "GET", f"/api/v1/x?key={SECRET}", "1.1", 200), None,
+    )
+    RedactingFilter().filter(record)
+    client, method, path, version, status = record.args  # must not raise
+    assert (method, version, status) == ("GET", "1.1", 200)
+    assert SECRET not in path
+
+
+@pytest.mark.stdlib_only
 def test_every_entry_point_calls_unified_filter():
     root = Path(__file__).resolve().parents[1]
     for rel in ("app_factory.py", "desktop_main.py", "core/celery_app.py", "desktop_celery.py",
