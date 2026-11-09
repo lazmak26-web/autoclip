@@ -226,5 +226,34 @@ def create_app(mode: str = "web") -> FastAPI:
                 status_code=500, 
                 content={"status": "error", "detail": str(e)}
             )
-    
+
+    if mode == "web" and os.getenv("AUTOCLIP_SERVE_FRONTEND", "1") != "0":
+        _serve_frontend(app)
+
     return app
+
+
+def _serve_frontend(app: FastAPI) -> None:
+    """Serve the built React UI (frontend/dist) from the API process.
+
+    The Docker image ships frontend/dist but nothing served it, so a single-port
+    host (Railway, Fly, ...) only exposed the API. Registered last, so every API
+    route, /docs and /health still win; no-op when the build output is absent.
+    """
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    dist = Path(os.getenv("AUTOCLIP_FRONTEND_DIST") or Path(__file__).resolve().parent.parent / "frontend" / "dist")
+    index = dist / "index.html"
+    if not index.is_file():
+        return
+    dist_root = dist.resolve()
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = (dist_root / full_path).resolve()
+        if full_path and candidate.is_file() and dist_root in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(index)  # SPA fallback for client-side routes
